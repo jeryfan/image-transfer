@@ -1,0 +1,49 @@
+name: Push Docker Images to GHCR
+
+on:
+  workflow_dispatch: # 手动触发工作流
+    inputs:
+      images:
+        description: 'Comma-separated list of Docker images to transfer (e.g., "library/nginx:latest,redis:alpine")'
+        required: true
+
+jobs:
+  transfer-docker-images:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # 登录 Docker Hub
+      #   - name: Log in to Docker Hub
+      #     run: echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+
+      # 解析并处理镜像名
+      - name: Process and Transfer Images
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          IMAGES="${{ github.event.inputs.images }}"
+          IFS=',' read -ra IMAGE_LIST <<< "$IMAGES"
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+
+          for IMAGE in "${IMAGE_LIST[@]}"; do
+            echo "Processing image: $IMAGE"
+
+            # 提取镜像名称（去掉路径）
+            IMAGE_NAME=$(basename "$IMAGE")
+
+            TARGET_IMAGE="ghcr.io/${{ secrets.GHCR_USERNAME }}/$IMAGE_NAME"
+
+            echo "Pulling $IMAGE from Docker Hub..."
+            docker pull "$IMAGE"
+
+            echo "Tagging $IMAGE as $TARGET_IMAGE..."
+            docker tag "$IMAGE" "$TARGET_IMAGE"
+
+            echo "Pushing $TARGET_IMAGE to GHCR..."
+            docker push "$TARGET_IMAGE"
+          done
