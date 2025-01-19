@@ -14,21 +14,21 @@ jobs:
     steps:
       # 检出代码
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 登录 Docker Hub
-      #   - name: Log in to Docker Hub
-      #     run: echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
+      - name: Log in to Docker Hub
+        run: echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
 
       # 解析并处理镜像名
       - name: Process and Transfer Images
         env:
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           IMAGES="${{ github.event.inputs.images }}"
           IFS=',' read -ra IMAGE_LIST <<< "$IMAGES"
-          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
           for IMAGE in "${IMAGE_LIST[@]}"; do
             echo "Processing image: $IMAGE"
@@ -36,7 +36,7 @@ jobs:
             # 提取镜像名称（去掉路径）
             IMAGE_NAME=$(basename "$IMAGE")
 
-            TARGET_IMAGE="ghcr.io/${{ secrets.GHCR_USERNAME }}/$IMAGE_NAME"
+            TARGET_IMAGE="ghcr.io/$GITHUB_ACTOR/$IMAGE_NAME"
 
             echo "Pulling $IMAGE from Docker Hub..."
             docker pull "$IMAGE"
