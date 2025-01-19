@@ -1,10 +1,10 @@
-name: Push Docker Images to GHCR
+name: image transfer
 
 on:
-  workflow_dispatch: # 手动触发工作流
+  workflow_dispatch:
     inputs:
       images:
-        description: 'Comma-separated list of Docker images to transfer (e.g., "library/nginx:latest,redis:alpine")'
+        description: "镜像列表，以逗号分隔"
         required: true
 
 jobs:
@@ -16,34 +16,52 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 登录 Docker Hub
-      - name: Log in to Docker Hub
-        run: echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_HUB_USERNAME }}" --password-stdin
-
-      # 解析并处理镜像名
-      - name: Process and Transfer Images
+      # 登录到目标镜像仓库
+      - name: Log in to Registries
         env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
+          ALIYUN_USERNAME: ${{ secrets.ALIYUN_USERNAME }}
+          ALIYUN_PASSWORD: ${{ secrets.ALIYUN_PASSWORD }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
         run: |
-          IMAGES="${{ github.event.inputs.images }}"
-          IFS=',' read -ra IMAGE_LIST <<< "$IMAGES"
+          echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USERNAME" --password-stdin
+          echo "$ALIYUN_PASSWORD" | docker login -u "$ALIYUN_USERNAME" registry.cn-hangzhou.aliyuncs.com --password-stdin
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
+      # 解析镜像列表，拉取镜像并推送到多个注册表
+      - name: Pull and Push Images
+        env:
+          IMAGES: ${{ github.event.inputs.images }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          IFS=',' read -ra IMAGE_LIST <<< "$IMAGES"
           for IMAGE in "${IMAGE_LIST[@]}"; do
-            echo "Processing image: $IMAGE"
-
-            # 提取镜像名称（去掉路径）
             IMAGE_NAME=$(basename "$IMAGE")
+            echo "Processing $IMAGE_NAME..."
 
-            TARGET_IMAGE="ghcr.io/$GITHUB_ACTOR/$IMAGE_NAME"
+            # 拉取镜像，如果失败则直接退出
+            if ! docker pull "$IMAGE"; then
+              echo "Failed to pull $IMAGE. Stopping workflow."
+              exit 1
+            fi
 
-            echo "Pulling $IMAGE from Docker Hub..."
-            docker pull "$IMAGE"
+            # 推送到 GHCR
+            GHCR_IMAGE="ghcr.io/$GITHUB_ACTOR/$IMAGE_NAME"
+            echo "Tagging $IMAGE as $GHCR_IMAGE..."
+            docker tag "$IMAGE" "$GHCR_IMAGE"
+            if ! docker push "$GHCR_IMAGE"; then
+              echo "Failed to push $GHCR_IMAGE. Stopping workflow."
+              exit 1
+            fi
 
-            echo "Tagging $IMAGE as $TARGET_IMAGE..."
-            docker tag "$IMAGE" "$TARGET_IMAGE"
-
-            echo "Pushing $TARGET_IMAGE to GHCR..."
-            docker push "$TARGET_IMAGE"
+            # 推送到阿里云
+            ALIYUN_IMAGE="registry.cn-hangzhou.aliyuncs.com/$GITHUB_ACTOR/$IMAGE_NAME"
+            echo "Tagging $IMAGE as $ALIYUN_IMAGE..."
+            docker tag "$IMAGE" "$ALIYUN_IMAGE"
+            if ! docker push "$ALIYUN_IMAGE"; then
+              echo "Failed to push $ALIYUN_IMAGE. Stopping workflow."
+              exit 1
+            fi
           done
