@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       # 登录到目标镜像仓库
-      - name: Log in to Registries
+      - name: Login to Registries
         env:
           DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
           DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
@@ -39,29 +39,16 @@ jobs:
           IFS=',' read -ra IMAGE_LIST <<< "$IMAGES"
           for IMAGE in "${IMAGE_LIST[@]}"; do
             IMAGE_NAME=$(basename "$IMAGE")
-            echo "Processing $IMAGE_NAME..."
-
-            # 拉取镜像，如果失败则直接退出
-            if ! docker pull "$IMAGE"; then
-              echo "Failed to pull $IMAGE. Stopping workflow."
-              exit 1
-            fi
+            # 拉取镜像
+            docker pull "$IMAGE" --platform "linux/arm64"
 
             # 推送到 GHCR
             GHCR_IMAGE="ghcr.io/$GITHUB_ACTOR/$IMAGE_NAME"
-            echo "Tagging $IMAGE as $GHCR_IMAGE..."
             docker tag "$IMAGE" "$GHCR_IMAGE"
-            if ! docker push "$GHCR_IMAGE"; then
-              echo "Failed to push $GHCR_IMAGE. Stopping workflow."
-              exit 1
-            fi
+            docker push "$GHCR_IMAGE"
 
             # 推送到阿里云
             ALIYUN_IMAGE="registry.cn-hangzhou.aliyuncs.com/$GITHUB_ACTOR/$IMAGE_NAME"
-            echo "Tagging $IMAGE as $ALIYUN_IMAGE..."
             docker tag "$IMAGE" "$ALIYUN_IMAGE"
-            if ! docker push "$ALIYUN_IMAGE"; then
-              echo "Failed to push $ALIYUN_IMAGE. Stopping workflow."
-              exit 1
-            fi
+            docker push "$ALIYUN_IMAGE"
           done

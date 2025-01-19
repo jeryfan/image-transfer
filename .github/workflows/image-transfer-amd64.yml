@@ -1,0 +1,54 @@
+name: image transfer
+
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        description: "镜像列表，以逗号分隔"
+        required: true
+
+jobs:
+  transfer-docker-images:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 登录到目标镜像仓库
+      - name: Login to Registries
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
+          ALIYUN_USERNAME: ${{ secrets.ALIYUN_USERNAME }}
+          ALIYUN_PASSWORD: ${{ secrets.ALIYUN_PASSWORD }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USERNAME" --password-stdin
+          echo "$ALIYUN_PASSWORD" | docker login -u "$ALIYUN_USERNAME" registry.cn-hangzhou.aliyuncs.com --password-stdin
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      # 解析镜像列表，拉取镜像并推送到多个注册表
+      - name: Pull and Push Images
+        env:
+          IMAGES: ${{ github.event.inputs.images }}
+          GITHUB_ACTOR: ${{ github.actor }}
+        run: |
+          IFS=',' read -ra IMAGE_LIST <<< "$IMAGES"
+          for IMAGE in "${IMAGE_LIST[@]}"; do
+            IMAGE_NAME=$(basename "$IMAGE")
+            # 拉取镜像
+            docker pull "$IMAGE" --platform "linux/amd64"
+
+            # 推送到 GHCR
+            GHCR_IMAGE="ghcr.io/$GITHUB_ACTOR/$IMAGE_NAME"
+            docker tag "$IMAGE" "$GHCR_IMAGE"
+            docker push "$GHCR_IMAGE"
+
+            # 推送到阿里云
+            ALIYUN_IMAGE="registry.cn-hangzhou.aliyuncs.com/$GITHUB_ACTOR/$IMAGE_NAME"
+            docker tag "$IMAGE" "$ALIYUN_IMAGE"
+            docker push "$ALIYUN_IMAGE"
+          done
